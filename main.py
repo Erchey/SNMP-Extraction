@@ -6,19 +6,56 @@ from pysnmp.hlapi.v3arch.asyncio import (
 from OIDs import *
 
 
+# Function to get SNMP data (for both inbound and outbound traffic)
+async def get_snmp_data(snmpEngine, authData, transportTarget, oid):
+    errorIndication, errorStatus, errorIndex, varBinds = await getCmd(
+        snmpEngine,
+        authData,
+        transportTarget,
+        ContextData(),
+        ObjectType(oid)
+    )
+    if errorIndication:
+        print(f"Error: {errorIndication}")
+        return None
+    elif errorStatus:
+        print(f"ErrorStatus: {errorStatus.prettyPrint()}")
+        return None
+    else:
+        return varBinds[0][1]  # Return the value
+
+
+# Function to calculate the difference between two octet values
+def calculate_traffic_difference(previous_value, current_value):
+    return current_value - previous_value
+
+
+# Function to convert system uptime (timed ticks) to hours, minutes, and seconds
+def convert_uptime(uptime_value):
+
+    ticks = int(uptime_value)
+
+    seconds = ticks // 100  # 100 ticks = 1 second
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return hours, minutes, seconds
+
+
+# Main function to run the SNMP queries and update every 5 seconds
 async def run():
-    
     ifIndex = 1  # interface index
+    inbound_oid = d_inbound_oid
+    outbound_oid = d_outbound_oid
+    uptime_oid = d_uptime_oid  # System uptime OID
 
     # OIDs for inbound and outbound octets using raw OIDs, appending the interface index
     in_octets_oid = ObjectIdentity(f'{inbound_oid}.{ifIndex}')
     out_octets_oid = ObjectIdentity(f'{outbound_oid}.{ifIndex}')
     uptime_octets_oid = ObjectIdentity(f'{uptime_oid}')
 
-   
     authData = UsmUserData(
         'User2',
-        authKey='Cisco1234',  # Replace with actual authentication key
+        authKey='Cisco1234',  
         authProtocol=usmHMACSHAAuthProtocol,  # SHA auth protocol
         privProtocol=usmNoPrivProtocol  # No privacy protocol
     )
@@ -29,60 +66,37 @@ async def run():
     # Transport target for the SNMP request, with `create()` awaited
     transportTarget = await UdpTransportTarget.create(('192.168.100.5', 161))  # Port 161 is standard for SNMP
 
-    # Get inbound traffic
-    errorIndication_in, errorStatus_in, errorIndex_in, varBinds_in = await getCmd(
-        snmpEngine,
-        authData,
-        transportTarget,
-        ContextData(),
-        ObjectType(in_octets_oid)
-    )
+    # Initialize previous values for traffic calculation
+    previous_in_octets = 0
+    previous_out_octets = 0
 
-    # Get outbound traffic
-    errorIndication_out, errorStatus_out, errorIndex_out, varBinds_out = await getCmd(
-        snmpEngine,
-        authData,
-        transportTarget,
-        ContextData(),
-        ObjectType(out_octets_oid)
-    )
+    while True:
+        # Get inbound traffic
+        in_octets = await get_snmp_data(snmpEngine, authData, transportTarget, in_octets_oid)
+        # Get outbound traffic
+        out_octets = await get_snmp_data(snmpEngine, authData, transportTarget, out_octets_oid)
+        # Get system uptime
+        uptime_ticks = await get_snmp_data(snmpEngine, authData, transportTarget, uptime_octets_oid)
 
-     # Get system uptime
-    errorIndication_uptime, errorStatus_uptime, errorIndex_uptime, varBinds_uptime = await getCmd(
-        snmpEngine,
-        authData,
-        transportTarget,
-        ContextData(),
-        ObjectType(uptime_octets_oid)
-    )
+        # Handle inbound traffic
+        if in_octets is not None:
+            inbound_diff = calculate_traffic_difference(previous_in_octets, in_octets)
+            previous_in_octets = in_octets
+            print(f"Inbound Traffic (Octets): {in_octets}, Difference: {inbound_diff} bytes")
 
+        # Handle outbound traffic
+        if out_octets is not None:
+            outbound_diff = calculate_traffic_difference(previous_out_octets, out_octets)
+            previous_out_octets = out_octets
+            print(f"Outbound Traffic (Octets): {out_octets}, Difference: {outbound_diff} bytes")
 
-    # Handling inbound traffic response
-    if errorIndication_in:
-        print(f"Error (Inbound): {errorIndication_in}")
-    elif errorStatus_in:
-        print(f"ErrorStatus (Inbound): {errorStatus_in.prettyPrint()}")
-    else:
-        in_octets = varBinds_in[0][1]
-        print(f"Inbound Traffic (Octets): {in_octets}")
+        # Handle uptime
+        if uptime_ticks is not None:
+            hours, minutes, seconds = convert_uptime(uptime_ticks)
+            print(f"System Uptime: {hours} hours, {minutes} minutes, {seconds} seconds")
 
-    # Handling outbound traffic response
-    if errorIndication_out:
-        print(f"Error (Outbound): {errorIndication_out}")
-    elif errorStatus_out:
-        print(f"ErrorStatus (Outbound): {errorStatus_out.prettyPrint()}")
-    else:
-        out_octets = varBinds_out[0][1]
-        print(f"Outbound Traffic (Octets): {out_octets}")
-
-    # Handling system uptime response
-    if errorIndication_uptime:
-        print(f"Error (Uptime): {errorIndication_uptime}")
-    elif errorStatus_uptime:
-        print(f"ErrorStatus (Uptime): {errorStatus_uptime.prettyPrint()}")
-    else:
-        uptime = varBinds_uptime[0][1]
-        print(f"System Uptime: {uptime}")
+        # Wait for 5 seconds before refreshing data
+        await asyncio.sleep(1)
 
 
 # Run the asyncio loop
