@@ -1,10 +1,8 @@
 import asyncio
 import time
-from pysnmp.hlapi.v3arch.asyncio import (
-    SnmpEngine, UsmUserData, UdpTransportTarget, ContextData, ObjectType, ObjectIdentity, getCmd, usmHMACSHAAuthProtocol, usmNoPrivProtocol
-)
+from pysnmp.hlapi.v3arch.asyncio import *
 from OIDs import *
-
+from interfaces import get_interfaces
 
 # Function to get SNMP data (for both inbound and outbound traffic)
 async def get_snmp_data(snmpEngine, authData, transportTarget, oid):
@@ -41,9 +39,10 @@ def convert_uptime(uptime_value):
     return hours, minutes, seconds
 
 
+
 # Main function to run the SNMP queries and update every 5 seconds
 async def run():
-    ifIndex = 1  # interface index
+    ifIndex = int(input('Enter interface: '))  # interface index
     inbound_oid = d_inbound_oid
     outbound_oid = d_outbound_oid
     uptime_oid = d_uptime_oid  # System uptime OID
@@ -82,13 +81,13 @@ async def run():
         if in_octets is not None:
             inbound_diff = calculate_traffic_difference(previous_in_octets, in_octets)
             previous_in_octets = in_octets
-            print(f"Inbound Traffic (Octets): {in_octets}, Difference: {inbound_diff} bytes")
+            print(f"Inbound Traffic (Octets): {inbound_diff} bytes")
 
         # Handle outbound traffic
         if out_octets is not None:
             outbound_diff = calculate_traffic_difference(previous_out_octets, out_octets)
             previous_out_octets = out_octets
-            print(f"Outbound Traffic (Octets): {out_octets}, Difference: {outbound_diff} bytes")
+            print(f"Outbound Traffic (Octets): {outbound_diff} bytes")
 
         # Handle uptime
         if uptime_ticks is not None:
@@ -98,6 +97,6 @@ async def run():
         # Wait for 5 seconds before refreshing data
         await asyncio.sleep(1)
 
-
+asyncio.run(get_interfaces())
 # Run the asyncio loop
 asyncio.run(run())
