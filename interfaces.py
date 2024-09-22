@@ -20,8 +20,6 @@ async def get_interfaces():
     # OID for the ifDescr table (interface descriptions) base
     base_oid = d_if_descr
 
-    print("Querying interface descriptions dynamically...")
-
     # Initialize index to start from
     i = 1
     interface_count = 0  # Counter for the number of interfaces found
