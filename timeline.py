@@ -1,7 +1,6 @@
-import asyncio, time
+import asyncio, datetime
 from pysnmp.hlapi.v3arch.asyncio import *
 from OIDs import *
-from interfaces import get_interfaces
 from database import store_data_in_db
 
 # Function to get SNMP data (for both inbound and outbound traffic)
@@ -34,13 +33,18 @@ def convert_uptime(uptime_value):
     minutes, seconds = divmod(remainder, 60)
     return hours, minutes, seconds
 
+# Function to convert uptime ticks into time format
+def convert_ticks_to_time(ticks):
+    seconds = ticks // 100  
+    return str(datetime.timedelta(seconds=seconds))
+
 # Function to monitor the SNMP data every 1 second
 async def monitor_snmp_data(ifIndex, db_path, store_interval):
     inbound_oid = d_inbound_oid
     outbound_oid = d_outbound_oid
     uptime_oid = d_uptime_oid  # System uptime OID
 
-    # OIDs for inbound and outbound octets using raw OIDs, appending the interface index
+    # OIDs for inbound and outbound octets, appending the interface index
     in_octets_oid = ObjectIdentity(f'{inbound_oid}.{ifIndex}')
     out_octets_oid = ObjectIdentity(f'{outbound_oid}.{ifIndex}')
     uptime_octets_oid = ObjectIdentity(f'{uptime_oid}')
@@ -59,29 +63,37 @@ async def monitor_snmp_data(ifIndex, db_path, store_interval):
     transportTarget = await UdpTransportTarget.create(('192.168.100.5', 161))  # Port 161 is standard for SNMP
 
     # Initialize previous values for traffic calculation
-    previous_in_octets = 0
-    previous_out_octets = 0
+    previous_in_octets = None
+    previous_out_octets = None
     last_store_time = asyncio.get_event_loop().time()  # Track last time we stored data
+    is_first_iteration = True  # Flag to skip first iteration for traffic calculation
+
+    # Accumulators for cumulative traffic over the interval
+    cumulative_inbound_traffic = 0
+    cumulative_outbound_traffic = 0
+    cumulative_total_traffic = 0
 
     while True:
         # Get inbound traffic
-        in_octets = await get_snmp_data(snmpEngine, authData, transportTarget, in_octets_oid)
+        in_octets = int(await get_snmp_data(snmpEngine, authData, transportTarget, in_octets_oid))
         # Get outbound traffic
-        out_octets = await get_snmp_data(snmpEngine, authData, transportTarget, out_octets_oid)
+        out_octets = int(await get_snmp_data(snmpEngine, authData, transportTarget, out_octets_oid))
         # Get system uptime
-        uptime_ticks = await get_snmp_data(snmpEngine, authData, transportTarget, uptime_octets_oid)
+        uptime_ticks = int(await get_snmp_data(snmpEngine, authData, transportTarget, uptime_octets_oid))
 
         # Handle inbound traffic
-        if in_octets is not None:
+        if in_octets is not None and previous_in_octets is not None and not is_first_iteration:
             inbound_diff = calculate_traffic_difference(previous_in_octets, in_octets)
-            previous_in_octets = in_octets
+            cumulative_inbound_traffic += inbound_diff  # Accumulate inbound traffic
             print(f"Inbound Traffic (Octets): {inbound_diff} bytes")
+        previous_in_octets = in_octets  # Update previous inbound octets after every iteration
 
         # Handle outbound traffic
-        if out_octets is not None:
+        if out_octets is not None and previous_out_octets is not None and not is_first_iteration:
             outbound_diff = calculate_traffic_difference(previous_out_octets, out_octets)
-            previous_out_octets = out_octets
+            cumulative_outbound_traffic += outbound_diff  # Accumulate outbound traffic
             print(f"Outbound Traffic (Octets): {outbound_diff} bytes")
+        previous_out_octets = out_octets  # Update previous outbound octets after every iteration
 
         # Handle uptime
         if uptime_ticks is not None:
@@ -91,23 +103,24 @@ async def monitor_snmp_data(ifIndex, db_path, store_interval):
         # Check if it's time to store data in the database
         current_time = asyncio.get_event_loop().time()
         if current_time - last_store_time >= store_interval:
-            if in_octets is not None and out_octets is not None and uptime_ticks is not None:
-                inbound_traffic = int(in_octets)
-                outbound_traffic = int(out_octets)
-                total_traffic = inbound_traffic + outbound_traffic  
-                uptime_ticks_int = int(uptime_ticks)  # Cast uptime to int
-                store_data_in_db(db_path, total_traffic, uptime_ticks_int, inbound_traffic, outbound_traffic)  # Pass int values to the database
-                print(f"Data stored in DB at time: {hours}h {minutes}m {seconds}s")
+            # Calculate total traffic for the interval
+            cumulative_total_traffic = cumulative_inbound_traffic + cumulative_outbound_traffic  
+
+            # Convert uptime to time format
+            uptime_ticks_int = convert_ticks_to_time(int(uptime_ticks))  # Cast uptime to time
+
+            # **Store data in DB even if traffic is zero**
+            store_data_in_db(db_path, cumulative_total_traffic, uptime_ticks_int, cumulative_inbound_traffic, cumulative_outbound_traffic)
+            print(f"Data stored in DB at time: {hours}h {minutes}m {seconds}s")
+
+            # Reset the cumulative traffic counters after storing
+            cumulative_inbound_traffic = 0
+            cumulative_outbound_traffic = 0
 
             last_store_time = current_time  # Update last store time
 
+        # Skip the first result for traffic calculation
+        is_first_iteration = False
+
         # Refresh every 1 second for data collection
         await asyncio.sleep(1)
-
-def collect_data():
-    """Simulate data collection; replace with actual logic."""
-    return 100  # Example data value, replace with actual data gathering logic
-
-def get_system_uptime():
-    """Simulate system uptime collection; replace with actual logic to query uptime."""
-    return time.time()  # Replace this with actual uptime query (e.g., from SNMP)

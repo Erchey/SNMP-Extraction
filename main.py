@@ -16,4 +16,8 @@ async def main():
     await monitor_snmp_data(ifIndex, db_path='monitoring_data.db', store_interval=30)  # 300 seconds = 5 minutes
 
 # Run the asyncio loop only once
-asyncio.run(main())
+try:
+    asyncio.run(main())
+
+except KeyboardInterrupt:
+    print('Execution Interrupted')

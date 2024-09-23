@@ -10,7 +10,7 @@ def store_data_in_db(db_path, data, uptime, in_traffic, out_traffic):
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                         total_traf INTEGER,
-                        uptime INTEGER,
+                        uptime DATETIME,
                         in_traf INTEGER,
                         out_traf INTEGER
                         )''')
